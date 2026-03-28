@@ -1,0 +1,75 @@
+name: Image Crop and Convert Pro
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "file/pict.txt"
+     # - ".github/workflows/url_to_webp.yml"
+
+jobs:
+  process_images:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Sharp
+        run: |
+          npm init -y
+          npm install sharp
+
+      - name: Process pict.txt and Images
+        run: |
+          TEXT_FILE="file/pict.txt"
+          IMAGE_DIR="file/pic"
+          mkdir -p "$IMAGE_DIR"
+          TEMP_FILE="file/pict_tmp.txt"
+          > "$TEMP_FILE"
+
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -z "$line" ] && continue
+
+            url=$(echo "$line" | awk '{print $1}')
+            name=$(echo "$line" | awk '{print $2}')
+            status=$(echo "$line" | awk '{print $3}')
+
+            if [ "$status" != "1" ] && [ "$status" != "error" ]; then
+              echo "---------------------------------------"
+              echo "正在处理: $url"
+              
+              if curl -sL --connect-timeout 15 --retry 3 "$url" -o "temp_img"; then
+                # 一行 Node 命令处理逻辑
+                if node -e "const sharp = require('sharp'); const size = 512; const circle = Buffer.from('<svg width=\"' + size + '\" height=\"' + size + '\"><circle cx=\"' + (size/2) + '\" cy=\"' + (size/2) + '\" r=\"' + (size/2) + '\" fill=\"white\"/></svg>'); sharp('temp_img').resize(size, size, { fit: 'cover' }).composite([{ input: circle, blend: 'dest-in' }]).webp({ quality: 60 }).toFile('${IMAGE_DIR}/${name}.webp').then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });"; then
+                  echo "$url $name 1" >> "$TEMP_FILE"
+                  echo "成功: $name.webp"
+                else
+                  echo "$url $name error" >> "$TEMP_FILE"
+                fi
+              else
+                echo "$url $name error" >> "$TEMP_FILE"
+              fi
+              rm -f temp_img
+            else
+              echo "$line" >> "$TEMP_FILE"
+            fi
+          done < "$TEXT_FILE"
+          mv "$TEMP_FILE" "$TEXT_FILE"
+
+      - name: Commit and Push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .
+          if ! git diff --cached --exit-code; then
+            git commit -m "Fix: 使用单行 Node 脚本实现圆形 WebP"
+            git push
+          else
+            echo "没有变动"
+          fi
