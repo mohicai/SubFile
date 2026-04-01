@@ -1,0 +1,80 @@
+name: Convert .list/.domain to .mrs and update Gist
+
+on:
+  push:
+    paths:
+      - 'file/**/*.list'
+      - 'file/**/*.domain'
+      - '.github/workflows/convert_and_update.yml'
+  workflow_dispatch:        # 支持手动触发
+
+jobs:
+  convert-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # 允许写入仓库内容
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+
+      - name: Install Mihomo
+        run: |
+          curl -L https://github.com/MetaCubeX/mihomo/releases/download/v1.19.18/mihomo-linux-amd64-v3-v1.19.18.gz -o mihomo.gz
+          gzip -d mihomo.gz
+          chmod +x mihomo
+          sudo mv mihomo /usr/local/bin/mihomo
+
+      - name: Convert .list/.domain files to .mrs
+        run: |
+          for f in $(find file -name "*.list"); do
+            base="${f%.list}"
+            echo "Converting $f -> ${base}.mrs"
+            mihomo convert-ruleset domain text "$f" "${base}.mrs"
+          done
+          for f in $(find file -name "*.domain"); do
+            base="${f%.domain}"
+            echo "Converting $f -> ${base}.mrs"
+            mihomo convert-ruleset ipcidr text "$f" "${base}.mrs"
+          done
+      - name: Push .mrs files to SubFile repo
+        env:
+          SUBFILE_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
+        run: |
+          # 克隆目标仓库
+          git clone https://x-access-token:${SUBFILE_TOKEN}@github.com/mohicai/SubFile.git SubFile
+          
+          # 确保 mrs/ 目录存在
+          mkdir -p SubFile/mrs
+          
+          # 复制生成的 .mrs 文件
+          cp file/*.mrs SubFile/mrs/
+          
+          # 提交并推送
+          cd SubFile
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add mrs/*.mrs
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "Sync converted .mrs files into mrs/ directory"
+          git push https://x-access-token:${SUBFILE_TOKEN}@github.com/mohicai/SubFile.git HEAD:main --force
+      - name: Update Gist with .mrs files
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: "6688b4649d45a7778b7477f1c470517c"
+        run: |
+          FILES_JSON="{\"files\":{"
+          for f in file/*.mrs; do
+            CONTENT=$(jq -Rs . < "$f")
+            BASENAME=$(basename "$f")
+            FILES_JSON="$FILES_JSON\"$BASENAME\":{\"content\":$CONTENT},"
+          done
+          FILES_JSON="${FILES_JSON%,}}"
+
+          curl -X PATCH \
+            -H "Authorization: token $GIST_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/gists/$GIST_ID \
+            -d "$FILES_JSON"
