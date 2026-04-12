@@ -1,0 +1,35 @@
+name: Convert PNG to WebP
+
+on:
+  workflow_dispatch:
+    # 监听某目录下的 PNG
+  push:
+    paths:
+      - "file/pic/*.png"
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install cwebp
+        run: sudo apt-get update && sudo apt-get install -y webp
+
+      - name: Convert PNG to WebP
+        run: |
+          TARGET_DIR="file/pic"   # 你要转换的目录
+          find "$TARGET_DIR" -type f -name "*.png" | while read file; do
+            outfile="${file%.png}.webp"
+            echo "Converting $file → $outfile"
+            cwebp -q 20 "$file" -o "$outfile"
+          done
+
+      - name: Commit converted files
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .
+          git commit -m "Auto convert PNG to WebP" || echo "No changes to commit"
+          git push
